@@ -5,7 +5,7 @@ LDFLAGS = -ldflags '-s -w -extldflags "-static"'
 .PHONY: build
 build:
 	go build $(LDFLAGS) -o bin/host ./cmd/host
-	GOOS=linux CGO_ENABLED=0 go build $(LDFLAGS) -o bin/vm ./cmd/vm
+	CGO_ENABLED=0 go build $(LDFLAGS) -o bin/vm ./cmd/vm
 
 .PHONY: clean
 clean:

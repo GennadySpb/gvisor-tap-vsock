@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"gvisor.dev/gvisor/pkg/tcpip"
 	"io"
 	"net"
 	"net/http"
@@ -21,7 +22,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/songgao/packets/ethernet"
 	"github.com/songgao/water"
-	"github.com/vishvananda/netlink"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 )
 
@@ -75,10 +75,7 @@ func run() error {
 	}
 
 	tap, err := water.New(water.Config{
-		DeviceType: water.TAP,
-		PlatformSpecificParams: water.PlatformSpecificParams{
-			Name: iface,
-		},
+		DeviceType: water.TUN,
 	})
 	if err != nil {
 		return errors.Wrap(err, "cannot create tap device")
@@ -141,11 +138,23 @@ func rx(conn net.Conn, tap *water.Interface, errCh chan error, mtu int) {
 			log.Info(packet.String())
 		}
 
+		pkt := make([]byte, header.EthernetMinimumSize)
+		eth := header.Ethernet(pkt)
+		eth.Encode(&header.EthernetFields{
+			Type:    header.IPv4ProtocolNumber,
+			SrcAddr: tcpip.LinkAddress("\x5A\x94\xEF\xE4\x0C\xDE"),
+			DstAddr: tcpip.LinkAddress("\x5A\x94\xEF\xE4\x0C\xDD"),
+		})
+
 		size := make([]byte, 2)
-		binary.LittleEndian.PutUint16(size, uint16(n))
+		binary.LittleEndian.PutUint16(size, uint16(n+header.EthernetMinimumSize))
 
 		if _, err := conn.Write(size); err != nil {
 			errCh <- errors.Wrap(err, "cannot write size to socket")
+			return
+		}
+		if _, err := conn.Write(pkt); err != nil {
+			errCh <- errors.Wrap(err, "cannot write packet to socket")
 			return
 		}
 		if _, err := conn.Write(frame); err != nil {
@@ -186,7 +195,7 @@ func tx(conn net.Conn, tap *water.Interface, errCh chan error, mtu int) {
 			log.Info(packet.String())
 		}
 
-		if _, err := tap.Write(buf[:size]); err != nil {
+		if _, err := tap.Write(buf[header.EthernetMinimumSize:size]); err != nil {
 			errCh <- errors.Wrap(err, "cannot write packet to tap")
 			return
 		}
@@ -194,65 +203,7 @@ func tx(conn net.Conn, tap *water.Interface, errCh chan error, mtu int) {
 }
 
 func linkUp(handshake types.Handshake) (func(), error) {
-	link, err := netlink.LinkByName(iface)
-	if err != nil {
-		return func() {}, err
-	}
-	newDefaultRoute := netlink.Route{
-		LinkIndex: link.Attrs().Index,
-		Gw:        net.ParseIP(handshake.Gateway),
-	}
-	addr, err := netlink.ParseAddr(handshake.VM)
-	if err != nil {
-		return func() {}, err
-	}
-	if err := netlink.AddrAdd(link, addr); err != nil {
-		return func() {}, errors.Wrap(err, "cannot add address")
-	}
-	if err := netlink.LinkSetMTU(link, handshake.MTU); err != nil {
-		return func() {}, errors.Wrap(err, "cannot set link mtu")
-	}
-	if err := netlink.LinkSetUp(link); err != nil {
-		return func() {}, errors.Wrap(err, "cannot set link up")
-	}
+	return func() {
 
-	if !changeDefaultRoute {
-		return func() {}, nil
-	}
-	defaultRoute, err := defaultRoute()
-	if err != nil {
-		log.Warn(err)
-	}
-	cleanup := func() {
-		if err := netlink.RouteDel(&newDefaultRoute); err != nil {
-			log.Errorf("cannot remove new default gateway: %v", err)
-		}
-		if defaultRoute != nil {
-			if err := netlink.RouteAdd(defaultRoute); err != nil {
-				log.Errorf("cannot restore old default gateway: %v", err)
-			}
-		}
-	}
-	if defaultRoute != nil {
-		if err := netlink.RouteDel(defaultRoute); err != nil {
-			return cleanup, errors.Wrap(err, "cannot remove old default gateway")
-		}
-	}
-	if err := netlink.RouteAdd(&newDefaultRoute); err != nil {
-		return cleanup, errors.Wrap(err, "cannot add new default gateway")
-	}
-	return cleanup, nil
-}
-
-func defaultRoute() (*netlink.Route, error) {
-	routes, err := netlink.RouteList(nil, netlink.FAMILY_V4)
-	if err != nil {
-		return nil, err
-	}
-	for _, r := range routes {
-		if r.Dst == nil {
-			return &r, nil
-		}
-	}
-	return nil, errors.New("no default gateway found")
+	}, nil
 }
