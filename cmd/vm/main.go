@@ -134,7 +134,7 @@ func rx(conn net.Conn, tap *water.Interface, errCh chan error, mtu int) {
 		frame = frame[:n]
 
 		if debug {
-			packet := gopacket.NewPacket(frame, layers.LayerTypeEthernet, gopacket.Default)
+			packet := gopacket.NewPacket(frame, layers.LayerTypeIPv4, gopacket.Default)
 			log.Info(packet.String())
 		}
 
@@ -143,7 +143,7 @@ func rx(conn net.Conn, tap *water.Interface, errCh chan error, mtu int) {
 		eth.Encode(&header.EthernetFields{
 			Type:    header.IPv4ProtocolNumber,
 			SrcAddr: tcpip.LinkAddress("\x5A\x94\xEF\xE4\x0C\xDE"),
-			DstAddr: tcpip.LinkAddress("\x5A\x94\xEF\xE4\x0C\xDD"),
+			DstAddr: tcpip.LinkAddress("\xd2\x34\xca\xbf\x78\x76"),
 		})
 
 		size := make([]byte, 2)
@@ -193,6 +193,10 @@ func tx(conn net.Conn, tap *water.Interface, errCh chan error, mtu int) {
 		if debug {
 			packet := gopacket.NewPacket(buf[:size], layers.LayerTypeEthernet, gopacket.Default)
 			log.Info(packet.String())
+
+			if fmt.Sprintf("%v", packet.Layers()[1].LayerType()) == "ARP" {
+				continue
+			}
 		}
 
 		if _, err := tap.Write(buf[header.EthernetMinimumSize:size]); err != nil {
