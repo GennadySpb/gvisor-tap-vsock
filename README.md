@@ -1,7 +1,7 @@
 # gvisor-tap-vsock 
 
 A replacement for [VPNKit](https://github.com/moby/vpnkit), written in pure Go.
-
+It is based on the network stack of [gVisor](https://github.com/google/gvisor/tree/master/pkg/tcpip).
 ## How it works
 
 ### Internet access
@@ -13,6 +13,8 @@ A replacement for [VPNKit](https://github.com/moby/vpnkit), written in pure Go.
 2. Linux kernel sends raw Ethernet packets to the tap device.
 3. Tap device sends these packets to a process on the host using [vsock](https://wiki.qemu.org/Features/VirtioVsock)
 4. The process on the host maintains both internal (host to VM) and external (host to Internet endpoint) connections. It uses regular syscalls to connect to external endpoints. 
+
+This is the same behaviour as [slirp](https://wiki.qemu.org/index.php/Documentation/Networking#User_Networking_.28SLIRP.29). 
 
 ### Expose a port
 
@@ -48,14 +50,10 @@ In the VM, be sure to have `hv_sock` module loaded.
 
 On Fedora 32, it worked out of the box. On others distros, you might have to look at https://github.com/mdlayher/vsock#requirements.
 
-For CRC, the driver should be compiled with this patch: https://github.com/code-ready/machine-driver-libvirt/pull/45.
-
 #### macOS prerequisites
 
 Please locate the hyperkit state (there is a file called `connect` inside) folder and launch `host` with the following env variable:
 `VM_DIRECTORY=path_to_connect_directory`
-
-For CRC, the driver should be compiled with this patch: https://github.com/code-ready/machine-driver-hyperkit/pull/12.
 
 #### Run
 
@@ -65,10 +63,16 @@ For CRC, the driver should be compiled with this patch: https://github.com/code-
 
 ### VM
 
+With a container:
 ```
 (vm) # docker run -d --name=gvisor-tap-vsock --privileged --net=host -it quay.io/crcont/gvisor-tap-vsock:latest
 (vm) $ ping -c1 192.168.127.1
 (vm) $ curl http://redhat.com
+```
+
+With the binary:
+```
+(vm) # ./vm -debug
 ```
 
 ### Internal DNS
@@ -78,6 +82,9 @@ Activate it by changing the `/etc/resolv.conf` file inside the VM with:
 nameserver 192.168.127.1
 ```
 
+## Limitations
+
+* ICMP is not forwarded outside the network.
 
 ## Performance
 
