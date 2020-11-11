@@ -123,21 +123,42 @@ func run() error {
 	return <-errCh
 }
 
-func handshake(conn net.Conn) (types.Handshake, error) {
+func handshake(conn net.Conn) (*types.HandshakeResponse, error) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return nil, err
+	}
+	bin, err := json.Marshal(&types.HandshakeRequest{
+		Hostname:   hostname,
+		DeviceType: deviceType,
+	})
+	if err != nil {
+		return nil, err
+	}
+	writeSize := make([]byte, 2)
+	binary.LittleEndian.PutUint16(writeSize, uint16(len(bin)))
+
+	if _, err := conn.Write(writeSize); err != nil {
+		return nil, err
+	}
+	if _, err := conn.Write(bin); err != nil {
+		return nil, err
+	}
+
 	sizeBuf := make([]byte, 2)
 	if _, err := io.ReadFull(conn, sizeBuf); err != nil {
-		return types.Handshake{}, err
+		return nil, err
 	}
-	size := int(binary.LittleEndian.Uint16(sizeBuf[0:2]))
-	b := make([]byte, size)
+	readSize := int(binary.LittleEndian.Uint16(sizeBuf[0:2]))
+	b := make([]byte, readSize)
 	if _, err := io.ReadFull(conn, b); err != nil {
-		return types.Handshake{}, err
+		return nil, err
 	}
-	var handshake types.Handshake
+	var handshake types.HandshakeResponse
 	if err := json.Unmarshal(b, &handshake); err != nil {
-		return types.Handshake{}, err
+		return nil, err
 	}
-	return handshake, nil
+	return &handshake, nil
 }
 
 func rx(conn net.Conn, tap *water.Interface, errCh chan error, mtu int) {

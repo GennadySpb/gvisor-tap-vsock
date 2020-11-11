@@ -1,8 +1,12 @@
 package main
 
-import "github.com/code-ready/gvisor-tap-vsock/pkg/types"
+import (
+	"github.com/code-ready/gvisor-tap-vsock/pkg/types"
+)
 
-func linkUp(handshake types.Handshake) (func(), error) {
+const deviceType = types.TUN
+
+func linkUp(handshake *types.HandshakeResponse) (func(), error) {
 	return func() {
 	}, nil
 }
