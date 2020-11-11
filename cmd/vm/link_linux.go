@@ -9,7 +9,9 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-func linkUp(handshake types.Handshake) (func(), error) {
+const deviceType = types.TAP
+
+func linkUp(handshake *types.HandshakeResponse) (func(), error) {
 	link, err := netlink.LinkByName(iface)
 	if err != nil {
 		return func() {}, err
