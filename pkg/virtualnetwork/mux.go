@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/hashicorp/yamux"
+
 	"github.com/google/tcpproxy"
 	"github.com/sirupsen/logrus"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -94,6 +96,61 @@ func (n *VirtualNetwork) Mux() http.Handler {
 			},
 		}
 		remote.HandleConn(conn)
+	})
+	mux.HandleFunc("/listen-tunnel", func(w http.ResponseWriter, r *http.Request) {
+		ip := r.URL.Query().Get("ip")
+		if ip == "" {
+			http.Error(w, "ip is mandatory", http.StatusInternalServerError)
+			return
+		}
+		port, err := strconv.Atoi(r.URL.Query().Get("port"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "webserver doesn't support hijacking", http.StatusInternalServerError)
+			return
+		}
+
+		conn, bufrw, err := hj.Hijack()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer conn.Close()
+
+		if err := bufrw.Flush(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		session, err := yamux.Server(conn, nil)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+
+		var p tcpproxy.Proxy
+		p.ListenFunc = func(network, laddr string) (net.Listener, error) {
+			return gonet.ListenTCP(n.stack, tcpip.FullAddress{
+				NIC:  1,
+				Addr: tcpip.Address(net.ParseIP(ip).To4()),
+				Port: uint16(port),
+			}, ipv4.ProtocolNumber)
+		}
+		p.AddRoute("", &tcpproxy.DialProxy{
+			Addr: "",
+			DialContext: func(ctx context.Context, network, addr string) (conn net.Conn, e error) {
+				return session.Open()
+			},
+		})
+		if err := p.Run(); err != nil {
+			logrus.Error(err)
+			return
+		}
 	})
 	return mux
 }

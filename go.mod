@@ -8,6 +8,7 @@ require (
 	github.com/golang/protobuf v1.4.2 // indirect
 	github.com/google/gopacket v1.1.16
 	github.com/google/tcpproxy v0.0.0-20200125044825-b6bb9b5b8252
+	github.com/hashicorp/yamux v0.0.0-20200609203250-aecfd211c9ce
 	github.com/linuxkit/virtsock v0.0.0-20180830132707-8e79449dea07
 	github.com/mdlayher/vsock v0.0.0-20200508120832-7ad3638b3fbc
 	github.com/miekg/dns v1.1.35
