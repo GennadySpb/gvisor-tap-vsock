@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"flag"
@@ -18,6 +19,7 @@ import (
 	"github.com/code-ready/gvisor-tap-vsock/pkg/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/google/tcpproxy"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/songgao/packets/ethernet"
@@ -53,12 +55,35 @@ func main() {
 			return
 		}
 	}
+
+	if err := exposePodman(); err != nil {
+		log.Fatal(err)
+	}
+
 	for {
 		if err := run(); err != nil {
 			log.Error(err)
 		}
 		time.Sleep(time.Second)
 	}
+}
+
+func exposePodman() error {
+	var p tcpproxy.Proxy
+	p.AddRoute(":1234", &tcpproxy.DialProxy{
+		DialContext: func(ctx context.Context, network, addr string) (conn net.Conn, e error) {
+			return net.Dial("unix", "/var/run/podman/podman.sock")
+		},
+	})
+	if err := p.Start(); err != nil {
+		return err
+	}
+	go func() {
+		if err := p.Wait(); err != nil {
+			log.Error(err)
+		}
+	}()
+	return nil
 }
 
 func contains(s []string, e string) bool {
