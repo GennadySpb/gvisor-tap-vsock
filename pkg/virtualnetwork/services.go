@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/code-ready/gvisor-tap-vsock/pkg/services/dhcp"
 	"github.com/code-ready/gvisor-tap-vsock/pkg/services/dns"
 	"github.com/code-ready/gvisor-tap-vsock/pkg/services/forwarder"
 	"github.com/code-ready/gvisor-tap-vsock/pkg/types"
@@ -26,6 +27,10 @@ func addServices(configuration *types.Configuration, s *stack.Stack) (http.Handl
 	udpForwarder := forwarder.UDP(s, translation, &natLock)
 	s.SetTransportProtocolHandler(udp.ProtocolNumber, udpForwarder.HandlePacket)
 
+	if err := dhcpServer(configuration, s); err != nil {
+		return nil, err
+	}
+
 	if err := dnsServer(configuration, s); err != nil {
 		return nil, err
 	}
@@ -37,6 +42,19 @@ func addServices(configuration *types.Configuration, s *stack.Stack) (http.Handl
 	mux := http.NewServeMux()
 	mux.Handle("/forwarder/", http.StripPrefix("/forwarder", forwarderMux))
 	return mux, nil
+}
+
+func dhcpServer(configuration *types.Configuration, s *stack.Stack) error {
+	ln, err := dhcp.Dial(s, 1)
+	if err != nil {
+		return err
+	}
+	go func() {
+		if err := dhcp.Serve(ln, configuration); err != nil {
+			log.Error(err)
+		}
+	}()
+	return nil
 }
 
 func parseNATTable(configuration *types.Configuration) map[tcpip.Address]tcpip.Address {

@@ -23,6 +23,13 @@ github.com/hpcloud/tail/ratelimiter
 github.com/hpcloud/tail/util
 github.com/hpcloud/tail/watch
 github.com/hpcloud/tail/winfile
+# github.com/insomniacslk/dhcp v0.0.0-20210315110227-c51060810aaa
+## explicit
+github.com/insomniacslk/dhcp/dhcpv4
+github.com/insomniacslk/dhcp/dhcpv4/server4
+github.com/insomniacslk/dhcp/iana
+github.com/insomniacslk/dhcp/interfaces
+github.com/insomniacslk/dhcp/rfc1035label
 # github.com/linuxkit/virtsock v0.0.0-20180830132707-8e79449dea07
 ## explicit
 github.com/linuxkit/virtsock/pkg/hvsock
@@ -80,9 +87,15 @@ github.com/songgao/packets/ethernet
 # github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8
 ## explicit
 github.com/songgao/water
-# github.com/stretchr/testify v1.4.0
+# github.com/stretchr/testify v1.6.1
 ## explicit
 github.com/stretchr/testify/assert
+# github.com/u-root/u-root v7.0.0+incompatible
+github.com/u-root/u-root/pkg/cmdline
+github.com/u-root/u-root/pkg/rand
+github.com/u-root/u-root/pkg/shlex
+github.com/u-root/u-root/pkg/ubinary
+github.com/u-root/u-root/pkg/uio
 # github.com/vishvananda/netlink v1.1.0
 ## explicit
 github.com/vishvananda/netlink
@@ -100,8 +113,7 @@ golang.org/x/crypto/internal/subtle
 golang.org/x/crypto/poly1305
 golang.org/x/crypto/ssh
 golang.org/x/crypto/ssh/internal/bcrypt_pbkdf
-# golang.org/x/net v0.0.0-20201026091529-146b70c837a4
-## explicit
+# golang.org/x/net v0.0.0-20201110031124-69a78807bb2b
 golang.org/x/net/bpf
 golang.org/x/net/html
 golang.org/x/net/html/atom
@@ -110,8 +122,7 @@ golang.org/x/net/internal/iana
 golang.org/x/net/internal/socket
 golang.org/x/net/ipv4
 golang.org/x/net/ipv6
-# golang.org/x/sys v0.0.0-20201026133411-418715ba6fdd
-## explicit
+# golang.org/x/sys v0.0.0-20201112073958-5cba982894dd
 golang.org/x/sys/cpu
 golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/unix
@@ -143,6 +154,8 @@ gopkg.in/fsnotify.v1
 gopkg.in/tomb.v1
 # gopkg.in/yaml.v2 v2.2.8
 gopkg.in/yaml.v2
+# gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c
+gopkg.in/yaml.v3
 # gvisor.dev/gvisor v0.0.0-20210106030213-99534ddb4e66
 ## explicit
 gvisor.dev/gvisor/pkg/gohacks
