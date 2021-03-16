@@ -47,6 +47,18 @@ func (n *VirtualNetwork) Mux() http.Handler {
 
 		n.networkSwitch.Accept(conn)
 	})
+
+	ln, err := net.Listen("unix", "/tmp/qemu.sock")
+	if err != nil {
+		panic(err)
+	}
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			panic(err)
+		}
+		go n.networkSwitch.Accept(conn)
+	}
 	mux.HandleFunc("/tunnel", func(w http.ResponseWriter, r *http.Request) {
 		ip := r.URL.Query().Get("ip")
 		if ip == "" {

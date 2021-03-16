@@ -2,14 +2,12 @@ package tap
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"sync"
 	"sync/atomic"
 
-	"github.com/code-ready/gvisor-tap-vsock/pkg/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/pkg/errors"
@@ -126,28 +124,12 @@ func (e *Switch) connect(conn net.Conn) (int, bool) {
 
 func (e *Switch) handshake(conn net.Conn, vm string) error {
 	log.Infof("assigning %s to %s", vm, conn.RemoteAddr().String())
-	bin, err := json.Marshal(&types.Handshake{
-		MTU:     e.maxTransmissionUnit,
-		Gateway: e.gatewayIP,
-		VM:      vm,
-	})
-	if err != nil {
-		return err
-	}
-	size := make([]byte, 2)
-	binary.LittleEndian.PutUint16(size, uint16(len(bin)))
-	if _, err := conn.Write(size); err != nil {
-		return err
-	}
-	if _, err := conn.Write(bin); err != nil {
-		return err
-	}
 	return nil
 }
 
 func (e *Switch) tx(src, dst tcpip.LinkAddress, pkt *stack.PacketBuffer) error {
-	size := make([]byte, 2)
-	binary.LittleEndian.PutUint16(size, uint16(pkt.Size()))
+	size := make([]byte, 4)
+	binary.BigEndian.PutUint32(size, uint32(pkt.Size()))
 
 	e.writeLock.Lock()
 	defer e.writeLock.Unlock()
@@ -218,17 +200,17 @@ func (e *Switch) disconnect(id int, conn net.Conn) {
 }
 
 func (e *Switch) rx(id int, conn net.Conn) error {
-	sizeBuf := make([]byte, 2)
+	sizeBuf := make([]byte, 4)
 
 	for {
 		n, err := io.ReadFull(conn, sizeBuf)
 		if err != nil {
 			return errors.Wrap(err, "cannot read size from socket")
 		}
-		if n != 2 {
+		if n != 4 {
 			return fmt.Errorf("unexpected size %d", n)
 		}
-		size := int(binary.LittleEndian.Uint16(sizeBuf[0:2]))
+		size := int(binary.BigEndian.Uint32(sizeBuf[0:4]))
 
 		buf := make([]byte, size)
 		n, err = io.ReadFull(conn, buf)
