@@ -38,7 +38,7 @@ type Switch struct {
 	maxTransmissionUnit int
 
 	nextConnID int
-	conns      map[int]net.Conn
+	conns      map[int]VirtualMachine
 	connLock   sync.Mutex
 
 	cam     map[tcpip.LinkAddress]int
@@ -55,7 +55,7 @@ func NewSwitch(debug bool, mtu int, ipPool *IPPool) *Switch {
 	return &Switch{
 		debug:               debug,
 		maxTransmissionUnit: mtu,
-		conns:               make(map[int]net.Conn),
+		conns:               make(map[int]VirtualMachine),
 		cam:                 make(map[tcpip.LinkAddress]int),
 		IPs:                 ipPool,
 	}
@@ -118,7 +118,10 @@ func (e *Switch) connect(conn net.Conn) (int, bool) {
 		return 0, true
 	}
 
-	e.conns[id] = conn
+	e.conns[id] = VirtualMachine{
+		ID:   id,
+		Conn: conn,
+	}
 	return id, false
 }
 
@@ -160,17 +163,17 @@ func (e *Switch) tx(src, dst tcpip.LinkAddress, pkt *stack.PacketBuffer) error {
 			srcID = -1
 		}
 		e.camLock.RUnlock()
-		for id, conn := range e.conns {
+		for id, vm := range e.conns {
 			if id == srcID {
 				continue
 			}
-			if _, err := conn.Write(size); err != nil {
-				e.disconnect(id, conn)
+			if _, err := vm.Conn.Write(size); err != nil {
+				e.disconnect(id, vm.Conn)
 				return err
 			}
 			for _, view := range pkt.Views() {
-				if _, err := conn.Write(view); err != nil {
-					e.disconnect(id, conn)
+				if _, err := vm.Conn.Write(view); err != nil {
+					e.disconnect(id, vm.Conn)
 					return err
 				}
 			}
@@ -185,17 +188,18 @@ func (e *Switch) tx(src, dst tcpip.LinkAddress, pkt *stack.PacketBuffer) error {
 			return nil
 		}
 		e.camLock.RUnlock()
-		conn := e.conns[id]
-		if _, err := conn.Write(size); err != nil {
-			e.disconnect(id, conn)
+		vm := e.conns[id]
+		if _, err := vm.Conn.Write(size); err != nil {
+			e.disconnect(id, vm.Conn)
 			return err
 		}
 		for _, view := range pkt.Views() {
-			if _, err := conn.Write(view); err != nil {
-				e.disconnect(id, conn)
+			if _, err := vm.Conn.Write(view); err != nil {
+				e.disconnect(id, vm.Conn)
 				return err
 			}
 		}
+
 		atomic.AddUint64(&e.Sent, uint64(pkt.Size()))
 	}
 	return nil
