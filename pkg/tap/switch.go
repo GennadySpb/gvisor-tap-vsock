@@ -2,14 +2,12 @@ package tap
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"sync"
 	"sync/atomic"
 
-	"github.com/code-ready/gvisor-tap-vsock/pkg/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/pkg/errors"
@@ -108,42 +106,20 @@ func (e *Switch) connect(conn net.Conn) (int, bool) {
 	id := e.nextConnID
 	e.nextConnID++
 
-	ip, err := e.IPs.Assign(id)
-	if err != nil {
-		log.Error(err)
-		return 0, true
+	factory := &VirtualMachineFactory{
+		MTU:       e.maxTransmissionUnit,
+		GatewayIP: e.gateway.IP(),
+		IPs:       e.IPs,
 	}
-	if err := e.handshake(conn, fmt.Sprintf("%s/%d", ip, e.IPs.Mask())); err != nil {
+
+	vm, err := factory.handshake(id, conn)
+	if err != nil {
 		log.Error(errors.Wrapf(err, "cannot handshake with %s", conn.RemoteAddr().String()))
 		return 0, true
 	}
 
-	e.conns[id] = VirtualMachine{
-		ID:   id,
-		Conn: conn,
-	}
+	e.conns[id] = *vm
 	return id, false
-}
-
-func (e *Switch) handshake(conn net.Conn, vm string) error {
-	log.Infof("assigning %s to %s", vm, conn.RemoteAddr().String())
-	bin, err := json.Marshal(&types.Handshake{
-		MTU:     e.maxTransmissionUnit,
-		Gateway: e.gateway.IP(),
-		VM:      vm,
-	})
-	if err != nil {
-		return err
-	}
-	size := make([]byte, 2)
-	binary.LittleEndian.PutUint16(size, uint16(len(bin)))
-	if _, err := conn.Write(size); err != nil {
-		return err
-	}
-	if _, err := conn.Write(bin); err != nil {
-		return err
-	}
-	return nil
 }
 
 func (e *Switch) tx(remote, local tcpip.LinkAddress, protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer) error {

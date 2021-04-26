@@ -2,9 +2,10 @@ package tap
 
 import (
 	"encoding/binary"
+	"net"
+
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
-	"net"
 )
 
 type VirtualMachine struct {
