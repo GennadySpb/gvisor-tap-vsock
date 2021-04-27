@@ -76,7 +76,7 @@ func (e *Switch) Connect(ep VirtualDevice) {
 }
 
 func (e *Switch) DeliverNetworkPacket(remote, local tcpip.LinkAddress, protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer) {
-	if err := e.tx(local, remote, pkt); err != nil {
+	if err := e.tx(remote, local, protocol, pkt); err != nil {
 		log.Error(err)
 	}
 }
@@ -146,19 +146,16 @@ func (e *Switch) handshake(conn net.Conn, vm string) error {
 	return nil
 }
 
-func (e *Switch) tx(src, dst tcpip.LinkAddress, pkt *stack.PacketBuffer) error {
-	size := make([]byte, 2)
-	binary.LittleEndian.PutUint16(size, uint16(pkt.Size()))
-
+func (e *Switch) tx(remote, local tcpip.LinkAddress, protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer) error {
 	e.writeLock.Lock()
 	defer e.writeLock.Unlock()
 
 	e.connLock.Lock()
 	defer e.connLock.Unlock()
 
-	if dst == header.EthernetBroadcastAddress {
+	if remote == header.EthernetBroadcastAddress {
 		e.camLock.RLock()
-		srcID, ok := e.cam[src]
+		srcID, ok := e.cam[local]
 		if !ok {
 			srcID = -1
 		}
@@ -167,40 +164,30 @@ func (e *Switch) tx(src, dst tcpip.LinkAddress, pkt *stack.PacketBuffer) error {
 			if id == srcID {
 				continue
 			}
-			if _, err := vm.Conn.Write(size); err != nil {
+			if err := vm.DeliverNetworkPacket(remote, local, protocol, pkt); err != nil {
 				e.disconnect(id, vm.Conn)
 				return err
-			}
-			for _, view := range pkt.Views() {
-				if _, err := vm.Conn.Write(view); err != nil {
-					e.disconnect(id, vm.Conn)
-					return err
-				}
 			}
 
 			atomic.AddUint64(&e.Sent, uint64(pkt.Size()))
 		}
 	} else {
 		e.camLock.RLock()
-		id, ok := e.cam[dst]
+		id, ok := e.cam[remote]
 		if !ok {
 			e.camLock.RUnlock()
 			return nil
 		}
 		e.camLock.RUnlock()
+
 		vm := e.conns[id]
-		if _, err := vm.Conn.Write(size); err != nil {
+		if err := vm.DeliverNetworkPacket(remote, local, protocol, pkt); err != nil {
 			e.disconnect(id, vm.Conn)
 			return err
 		}
-		for _, view := range pkt.Views() {
-			if _, err := vm.Conn.Write(view); err != nil {
-				e.disconnect(id, vm.Conn)
-				return err
-			}
-		}
 
 		atomic.AddUint64(&e.Sent, uint64(pkt.Size()))
+
 	}
 	return nil
 }
@@ -256,7 +243,7 @@ func (e *Switch) rx(id int, conn net.Conn) error {
 		e.camLock.Unlock()
 
 		if eth.DestinationAddress() != e.gateway.LinkAddress() {
-			if err := e.tx(eth.SourceAddress(), eth.DestinationAddress(), stack.NewPacketBuffer(stack.PacketBufferOptions{
+			if err := e.tx(eth.DestinationAddress(), eth.SourceAddress(), eth.Type(), stack.NewPacketBuffer(stack.PacketBufferOptions{
 				Data: vv,
 			})); err != nil {
 				log.Error(err)
