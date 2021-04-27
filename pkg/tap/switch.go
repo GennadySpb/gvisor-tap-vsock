@@ -36,13 +36,11 @@ type Switch struct {
 	maxTransmissionUnit int
 
 	nextConnID int
-	conns      map[int]VirtualMachine
+	conns      map[int]*VirtualMachine
 	connLock   sync.Mutex
 
 	cam     map[tcpip.LinkAddress]int
 	camLock sync.RWMutex
-
-	writeLock sync.Mutex
 
 	gateway VirtualDevice
 
@@ -53,7 +51,7 @@ func NewSwitch(debug bool, mtu int, ipPool *IPPool) *Switch {
 	return &Switch{
 		debug:               debug,
 		maxTransmissionUnit: mtu,
-		conns:               make(map[int]VirtualMachine),
+		conns:               make(map[int]*VirtualMachine),
 		cam:                 make(map[tcpip.LinkAddress]int),
 		IPs:                 ipPool,
 	}
@@ -118,14 +116,11 @@ func (e *Switch) connect(conn net.Conn) (int, bool) {
 		return 0, true
 	}
 
-	e.conns[id] = *vm
+	e.conns[id] = vm
 	return id, false
 }
 
 func (e *Switch) tx(remote, local tcpip.LinkAddress, protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer) error {
-	e.writeLock.Lock()
-	defer e.writeLock.Unlock()
-
 	e.connLock.Lock()
 	defer e.connLock.Unlock()
 
