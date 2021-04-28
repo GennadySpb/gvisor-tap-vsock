@@ -25,6 +25,7 @@ type VirtualDevice interface {
 }
 
 type NetworkSwitch interface {
+	FreePort() int
 	DeliverNetworkPacket(remote, local tcpip.LinkAddress, protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer)
 }
 
@@ -35,9 +36,11 @@ type Switch struct {
 	debug               bool
 	maxTransmissionUnit int
 
-	nextConnID int
-	conns      map[int]*VirtualMachine
-	connLock   sync.Mutex
+	nextConnID     int
+	nextConnIDLock sync.Mutex
+
+	conns    map[int]*VirtualMachine
+	connLock sync.Mutex
 
 	cam     map[tcpip.LinkAddress]int
 	camLock sync.RWMutex
@@ -97,12 +100,20 @@ func (e *Switch) Accept(conn net.Conn) {
 	}
 }
 
+func (e *Switch) FreePort() int {
+	e.nextConnIDLock.Lock()
+	defer e.nextConnIDLock.Unlock()
+
+	id := e.nextConnID
+	e.nextConnID++
+	return id
+}
+
 func (e *Switch) connect(conn net.Conn) (int, bool) {
 	e.connLock.Lock()
 	defer e.connLock.Unlock()
 
-	id := e.nextConnID
-	e.nextConnID++
+	id := e.FreePort()
 
 	factory := &VirtualMachineFactory{
 		MTU:       e.maxTransmissionUnit,
