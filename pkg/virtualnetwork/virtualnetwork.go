@@ -20,10 +20,12 @@ import (
 )
 
 type VirtualNetwork struct {
-	configuration *types.Configuration
-	stack         *stack.Stack
-	networkSwitch *tap.Switch
-	servicesMux   http.Handler
+	configuration         *types.Configuration
+	stack                 *stack.Stack
+	networkSwitch         *tap.Switch
+	virtualMachineFactory *tap.VirtualMachineFactory
+	qemuMachineFactory    *tap.VirtualMachineFactory
+	servicesMux           http.Handler
 }
 
 func New(configuration *types.Configuration) (*VirtualNetwork, error) {
@@ -35,11 +37,29 @@ func New(configuration *types.Configuration) (*VirtualNetwork, error) {
 	var endpoint stack.LinkEndpoint
 
 	ipPool := tap.NewIPPool(subnet)
-	ipPool.Reserve(net.ParseIP(configuration.GatewayIP), -1)
+	ipPool.Reserve(net.ParseIP(configuration.GatewayIP), configuration.GatewayMacAddress)
 	tapEndpoint := tap.NewLinkEndpoint(configuration.Debug, configuration.MTU, configuration.GatewayMacAddress, configuration.GatewayIP)
 	networkSwitch := tap.NewSwitch(configuration.Debug, configuration.MTU, ipPool)
 	tapEndpoint.Connect(networkSwitch)
 	networkSwitch.Connect(tapEndpoint)
+
+	factory := &tap.VirtualMachineFactory{
+		MTU:           configuration.MTU,
+		GatewayIP:     configuration.GatewayIP,
+		IPs:           ipPool,
+		Debug:         configuration.Debug,
+		NetworkSwitch: networkSwitch,
+		Protocol:      tap.HelperContainerProtocol,
+	}
+
+	factory2 := &tap.VirtualMachineFactory{
+		MTU:           configuration.MTU,
+		GatewayIP:     configuration.GatewayIP,
+		IPs:           ipPool,
+		Debug:         configuration.Debug,
+		NetworkSwitch: networkSwitch,
+		Protocol:      tap.QemuProtocol,
+	}
 
 	if configuration.CaptureFile != "" {
 		_ = os.Remove(configuration.CaptureFile)
@@ -60,16 +80,18 @@ func New(configuration *types.Configuration) (*VirtualNetwork, error) {
 		return nil, errors.Wrap(err, "cannot create network stack")
 	}
 
-	mux, err := addServices(configuration, stack)
+	mux, err := addServices(configuration, stack, ipPool)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot add network services")
 	}
 
 	return &VirtualNetwork{
-		configuration: configuration,
-		stack:         stack,
-		networkSwitch: networkSwitch,
-		servicesMux:   mux,
+		configuration:         configuration,
+		stack:                 stack,
+		networkSwitch:         networkSwitch,
+		servicesMux:           mux,
+		virtualMachineFactory: factory,
+		qemuMachineFactory:    factory2,
 	}, nil
 }
 
@@ -85,6 +107,10 @@ func (n *VirtualNetwork) BytesReceived() uint64 {
 		return 0
 	}
 	return n.networkSwitch.Received
+}
+
+func (n *VirtualNetwork) AcceptQemu(conn net.Conn) {
+	n.qemuMachineFactory.Accept(conn)
 }
 
 func createStack(configuration *types.Configuration, endpoint stack.LinkEndpoint) (*stack.Stack, error) {

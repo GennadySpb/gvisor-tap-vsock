@@ -1,8 +1,6 @@
 package tap
 
 import (
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 	log "github.com/sirupsen/logrus"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/buffer"
@@ -81,12 +79,6 @@ func (e *LinkEndpoint) WritePacket(r stack.RouteInfo, protocol tcpip.NetworkProt
 	if r.LocalLinkAddress != "" {
 		srcAddr = r.LocalLinkAddress
 	}
-	eth := header.Ethernet(pkt.LinkHeader().Push(header.EthernetMinimumSize))
-	eth.Encode(&header.EthernetFields{
-		Type:    protocol,
-		SrcAddr: srcAddr,
-		DstAddr: r.RemoteLinkAddress,
-	})
 
 	h := header.ARP(pkt.NetworkHeader().View())
 	if h.IsValid() &&
@@ -96,13 +88,7 @@ func (e *LinkEndpoint) WritePacket(r stack.RouteInfo, protocol tcpip.NetworkProt
 		return nil
 	}
 
-	if e.debug {
-		vv := buffer.NewVectorisedView(pkt.Size(), pkt.Views())
-		packet := gopacket.NewPacket(vv.ToView(), layers.LayerTypeEthernet, gopacket.Default)
-		log.Info(packet.String())
-	}
-
-	e.networkSwitch.DeliverNetworkPacket(r.RemoteLinkAddress, srcAddr, protocol, pkt)
+	e.networkSwitch.DeliverNetworkPacketWithPort(gatewayPort, r.RemoteLinkAddress, srcAddr, protocol, pkt)
 	return nil
 }
 

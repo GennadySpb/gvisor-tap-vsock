@@ -1,16 +1,11 @@
 package tap
 
 import (
-	"encoding/binary"
-	"fmt"
-	"io"
-	"net"
 	"sync"
 	"sync/atomic"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/buffer"
@@ -26,8 +21,12 @@ type VirtualDevice interface {
 
 type NetworkSwitch interface {
 	FreePort() int
-	DeliverNetworkPacket(remote, local tcpip.LinkAddress, protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer)
+	DeliverNetworkPacketWithPort(port int, remote, local tcpip.LinkAddress, protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer)
+	ConnectVM(port int, vm *VirtualMachine)
+	Disconnect(vm *VirtualMachine)
 }
+
+const gatewayPort = -1
 
 type Switch struct {
 	Sent     uint64
@@ -74,30 +73,27 @@ func (e *Switch) Connect(ep VirtualDevice) {
 	e.gateway = ep
 }
 
-func (e *Switch) DeliverNetworkPacket(remote, local tcpip.LinkAddress, protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer) {
-	if err := e.tx(remote, local, protocol, pkt); err != nil {
-		log.Error(err)
-	}
+func (e *Switch) ConnectVM(port int, vm *VirtualMachine) {
+	e.connLock.Lock()
+	defer e.connLock.Unlock()
+	e.conns[port] = vm
 }
 
-func (e *Switch) Accept(conn net.Conn) {
-	log.Infof("new connection from %s to %s", conn.RemoteAddr().String(), conn.LocalAddr().String())
-	id, failed := e.connect(conn)
-	if failed {
-		log.Error("connection failed")
-		_ = conn.Close()
-		return
+func (e *Switch) Disconnect(vm *VirtualMachine) {
+	e.camLock.Lock()
+	defer e.camLock.Unlock()
+
+	for address, targetConn := range e.cam {
+		if targetConn == vm.ID {
+			delete(e.cam, address)
+		}
 	}
 
-	defer func() {
-		e.connLock.Lock()
-		defer e.connLock.Unlock()
-		e.disconnect(id, conn)
-	}()
-	if err := e.rx(id, conn); err != nil {
-		log.Error(errors.Wrapf(err, "cannot receive packets from %s, disconnecting", conn.RemoteAddr().String()))
-		return
-	}
+	e.connLock.Lock()
+	defer e.connLock.Unlock()
+	delete(e.conns, vm.ID)
+
+	_ = vm.Close()
 }
 
 func (e *Switch) FreePort() int {
@@ -109,29 +105,44 @@ func (e *Switch) FreePort() int {
 	return id
 }
 
-func (e *Switch) connect(conn net.Conn) (int, bool) {
-	e.connLock.Lock()
-	defer e.connLock.Unlock()
-
-	id := e.FreePort()
-
-	factory := &VirtualMachineFactory{
-		MTU:       e.maxTransmissionUnit,
-		GatewayIP: e.gateway.IP(),
-		IPs:       e.IPs,
+func (e *Switch) DeliverNetworkPacketWithPort(id int, remote, local tcpip.LinkAddress, protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer) {
+	if e.debug {
+		debugPkt := pkt.Clone()
+		eth := header.Ethernet(debugPkt.LinkHeader().Push(header.EthernetMinimumSize))
+		eth.Encode(&header.EthernetFields{
+			Type:    protocol,
+			SrcAddr: local,
+			DstAddr: remote,
+		})
+		vv := buffer.NewVectorisedView(debugPkt.Size(), debugPkt.Views())
+		packet := gopacket.NewPacket(vv.ToView(), layers.LayerTypeEthernet, gopacket.Default)
+		log.Info(packet.String())
 	}
 
-	vm, err := factory.handshake(id, conn)
-	if err != nil {
-		log.Error(errors.Wrapf(err, "cannot handshake with %s", conn.RemoteAddr().String()))
-		return 0, true
+	e.camLock.Lock()
+	e.cam[local] = id
+	e.camLock.Unlock()
+
+	// send packets to VMs
+	if remote != e.gateway.LinkAddress() {
+		if err := e.sendVMs(remote, local, protocol, pkt); err != nil {
+			log.Error(err)
+		}
+	}
+	// then, send packets to the gateway
+	if remote == e.gateway.LinkAddress() || (remote == header.EthernetBroadcastAddress && local != e.gateway.LinkAddress()) {
+		e.gateway.DeliverNetworkPacket(
+			local,
+			remote,
+			protocol,
+			pkt,
+		)
 	}
 
-	e.conns[id] = vm
-	return id, false
+	atomic.AddUint64(&e.Received, uint64(pkt.Size()))
 }
 
-func (e *Switch) tx(remote, local tcpip.LinkAddress, protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer) error {
+func (e *Switch) sendVMs(remote, local tcpip.LinkAddress, protocol tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer) error {
 	e.connLock.Lock()
 	defer e.connLock.Unlock()
 
@@ -146,8 +157,8 @@ func (e *Switch) tx(remote, local tcpip.LinkAddress, protocol tcpip.NetworkProto
 			if id == srcID {
 				continue
 			}
-			if err := vm.DeliverNetworkPacket(remote, local, protocol, pkt); err != nil {
-				e.disconnect(id, vm.Conn)
+			if err := vm.DeliverNetworkPacket(remote, local, protocol, pkt.Clone()); err != nil {
+				e.Disconnect(vm)
 				return err
 			}
 
@@ -164,7 +175,7 @@ func (e *Switch) tx(remote, local tcpip.LinkAddress, protocol tcpip.NetworkProto
 
 		vm := e.conns[id]
 		if err := vm.DeliverNetworkPacket(remote, local, protocol, pkt); err != nil {
-			e.disconnect(id, vm.Conn)
+			e.Disconnect(vm)
 			return err
 		}
 
@@ -172,77 +183,4 @@ func (e *Switch) tx(remote, local tcpip.LinkAddress, protocol tcpip.NetworkProto
 
 	}
 	return nil
-}
-
-func (e *Switch) disconnect(id int, conn net.Conn) {
-	e.camLock.Lock()
-	defer e.camLock.Unlock()
-
-	for address, targetConn := range e.cam {
-		if targetConn == id {
-			delete(e.cam, address)
-		}
-	}
-	_ = conn.Close()
-	delete(e.conns, id)
-
-	e.IPs.Release(id)
-}
-
-func (e *Switch) rx(id int, conn net.Conn) error {
-	sizeBuf := make([]byte, 2)
-
-	for {
-		n, err := io.ReadFull(conn, sizeBuf)
-		if err != nil {
-			return errors.Wrap(err, "cannot read size from socket")
-		}
-		if n != 2 {
-			return fmt.Errorf("unexpected size %d", n)
-		}
-		size := int(binary.LittleEndian.Uint16(sizeBuf[0:2]))
-
-		buf := make([]byte, size)
-		n, err = io.ReadFull(conn, buf)
-		if err != nil {
-			return errors.Wrap(err, "cannot read packet from socket")
-		}
-		if n == 0 || n != size {
-			return fmt.Errorf("unexpected size %d != %d", n, size)
-		}
-
-		if e.debug {
-			packet := gopacket.NewPacket(buf, layers.LayerTypeEthernet, gopacket.Default)
-			log.Info(packet.String())
-		}
-
-		view := buffer.View(buf)
-		eth := header.Ethernet(view)
-		vv := buffer.NewVectorisedView(len(view), []buffer.View{view})
-
-		e.camLock.Lock()
-		e.cam[eth.SourceAddress()] = id
-		e.camLock.Unlock()
-
-		if eth.DestinationAddress() != e.gateway.LinkAddress() {
-			if err := e.tx(eth.DestinationAddress(), eth.SourceAddress(), eth.Type(), stack.NewPacketBuffer(stack.PacketBufferOptions{
-				Data: vv,
-			})); err != nil {
-				log.Error(err)
-			}
-		}
-		if eth.DestinationAddress() == e.gateway.LinkAddress() || eth.DestinationAddress() == header.EthernetBroadcastAddress {
-			vv.TrimFront(header.EthernetMinimumSize)
-			e.gateway.DeliverNetworkPacket(
-				eth.SourceAddress(),
-				eth.DestinationAddress(),
-				eth.Type(),
-				stack.NewPacketBuffer(stack.PacketBufferOptions{
-					Data: vv,
-				}),
-			)
-		}
-
-		atomic.AddUint64(&e.Received, uint64(size))
-	}
 }

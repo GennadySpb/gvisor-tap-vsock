@@ -21,10 +21,12 @@ var (
 	debug     bool
 	mtu       int
 	endpoints arrayFlags
+	qemu      string
 )
 
 func main() {
 	flag.Var(&endpoints, "listen", fmt.Sprintf("url where the tap send packets (default %s)", transport.DefaultURL))
+	flag.StringVar(&qemu, "listen-qemu", "", "url where qemu virtual machines connect")
 	flag.BoolVar(&debug, "debug", false, "debug")
 	flag.IntVar(&mtu, "mtu", 1500, "mtu")
 	flag.Parse()
@@ -73,6 +75,7 @@ func main() {
 		},
 		Forwards: map[string]string{
 			":2222": "192.168.127.2:22",
+			":2223": "192.168.127.3:22",
 		},
 		NAT: map[string]string{
 			"192.168.127.254": "127.0.0.1",
@@ -128,6 +131,22 @@ func run(configuration *types.Configuration, endpoints []string) error {
 			time.Sleep(5 * time.Second)
 		}
 	}()
+
+	if qemu != "" {
+		qemuListener, err := transport.Listen(qemu)
+		if err != nil {
+			return errors.Wrap(err, "cannot listen")
+		}
+		go func() {
+			for {
+				conn, err := qemuListener.Accept()
+				if err != nil {
+					continue
+				}
+				go vn.AcceptQemu(conn)
+			}
+		}()
+	}
 
 	ln, err := vn.Listen("tcp", fmt.Sprintf("%s:8080", configuration.GatewayIP))
 	if err != nil {
