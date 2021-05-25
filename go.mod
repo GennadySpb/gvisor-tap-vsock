@@ -18,8 +18,12 @@ require (
 	github.com/songgao/packets v0.0.0-20160404182456-549a10cd4091
 	github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8
 	github.com/stretchr/testify v1.6.1
-	github.com/vishvananda/netlink v1.1.0
+	github.com/vishvananda/netlink v1.1.1-0.20200221165523-c79a4b7b4066
 	golang.org/x/crypto v0.0.0-20201016220609-9e8e0b390897
-	golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9
+	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	gvisor.dev/gvisor v0.0.0-20210424070529-29f85eb7ca69
 )
+
+replace github.com/u-root/u-root => github.com/guillaumerose/u-root v0.0.0-20210525080135-2be937c42bb2
+
+replace github.com/insomniacslk/dhcp => github.com/guillaumerose/dhcp v0.0.0-20210525081117-105c28d65c3d

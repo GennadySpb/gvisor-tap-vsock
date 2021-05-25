@@ -21,7 +21,7 @@ github.com/hpcloud/tail/ratelimiter
 github.com/hpcloud/tail/util
 github.com/hpcloud/tail/watch
 github.com/hpcloud/tail/winfile
-# github.com/insomniacslk/dhcp v0.0.0-20210428091707-95b2ff6905c9
+# github.com/insomniacslk/dhcp v0.0.0-20210428091707-95b2ff6905c9 => github.com/guillaumerose/dhcp v0.0.0-20210525081117-105c28d65c3d
 ## explicit
 github.com/insomniacslk/dhcp/dhcpv4
 github.com/insomniacslk/dhcp/dhcpv4/server4
@@ -88,13 +88,13 @@ github.com/songgao/water
 # github.com/stretchr/testify v1.6.1
 ## explicit
 github.com/stretchr/testify/assert
-# github.com/u-root/u-root v7.0.0+incompatible
+# github.com/u-root/u-root v7.0.0+incompatible => github.com/guillaumerose/u-root v0.0.0-20210525080135-2be937c42bb2
 github.com/u-root/u-root/pkg/cmdline
 github.com/u-root/u-root/pkg/rand
 github.com/u-root/u-root/pkg/shlex
 github.com/u-root/u-root/pkg/ubinary
 github.com/u-root/u-root/pkg/uio
-# github.com/vishvananda/netlink v1.1.0
+# github.com/vishvananda/netlink v1.1.1-0.20200221165523-c79a4b7b4066
 ## explicit
 github.com/vishvananda/netlink
 github.com/vishvananda/netlink/nl
@@ -111,7 +111,7 @@ golang.org/x/crypto/internal/subtle
 golang.org/x/crypto/poly1305
 golang.org/x/crypto/ssh
 golang.org/x/crypto/ssh/internal/bcrypt_pbkdf
-# golang.org/x/net v0.0.0-20201224014010-6772e930b67b
+# golang.org/x/net v0.0.0-20210405180319-a5a99cb37ef4
 golang.org/x/net/bpf
 golang.org/x/net/html
 golang.org/x/net/html/atom
@@ -120,10 +120,10 @@ golang.org/x/net/internal/iana
 golang.org/x/net/internal/socket
 golang.org/x/net/ipv4
 golang.org/x/net/ipv6
-# golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9
+# golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 ## explicit
 golang.org/x/sync/errgroup
-# golang.org/x/sys v0.0.0-20210119212857-b64e53b001e4
+# golang.org/x/sys v0.0.0-20210510120138-977fb7262007
 golang.org/x/sys/cpu
 golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/unix
@@ -191,3 +191,5 @@ gvisor.dev/gvisor/pkg/tcpip/transport/tcp
 gvisor.dev/gvisor/pkg/tcpip/transport/tcpconntrack
 gvisor.dev/gvisor/pkg/tcpip/transport/udp
 gvisor.dev/gvisor/pkg/waiter
+# github.com/u-root/u-root => github.com/guillaumerose/u-root v0.0.0-20210525080135-2be937c42bb2
+# github.com/insomniacslk/dhcp => github.com/guillaumerose/dhcp v0.0.0-20210525081117-105c28d65c3d
