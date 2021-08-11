@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"gopkg.in/yaml.v2"
 	"net"
 	"net/http"
 	"net/http/pprof"
@@ -153,6 +154,8 @@ func main() {
 		},
 		Protocol: protocol,
 	}
+	b, _ := yaml.Marshal(config)
+	fmt.Println(string(b))
 
 	groupErrs.Go(func() error {
 		return run(ctx, groupErrs, &config, endpoints)
