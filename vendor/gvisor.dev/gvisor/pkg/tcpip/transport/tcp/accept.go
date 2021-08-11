@@ -114,8 +114,8 @@ type listenContext struct {
 }
 
 // timeStamp returns an 8-bit timestamp with a granularity of 64 seconds.
-func timeStamp() uint32 {
-	return uint32(time.Now().Unix()>>6) & tsMask
+func timeStamp(clock tcpip.Clock) uint32 {
+	return uint32(clock.NowMonotonic().Sub(tcpip.MonotonicTime{}).Seconds()) >> 6 & tsMask
 }
 
 // newListenContext creates a new listen context.
@@ -171,7 +171,7 @@ func (l *listenContext) cookieHash(id stack.TransportEndpointID, ts uint32, nonc
 // createCookie creates a SYN cookie for the given id and incoming sequence
 // number.
 func (l *listenContext) createCookie(id stack.TransportEndpointID, seq seqnum.Value, data uint32) seqnum.Value {
-	ts := timeStamp()
+	ts := timeStamp(l.stack.Clock())
 	v := l.cookieHash(id, 0, 0) + uint32(seq) + (ts << tsOffset)
 	v += (l.cookieHash(id, ts, 1) + data) & hashMask
 	return seqnum.Value(v)
@@ -181,7 +181,7 @@ func (l *listenContext) createCookie(id stack.TransportEndpointID, seq seqnum.Va
 // sequence number. If it is, it also returns the data originally encoded in the
 // cookie when createCookie was called.
 func (l *listenContext) isCookieValid(id stack.TransportEndpointID, cookie seqnum.Value, seq seqnum.Value) (uint32, bool) {
-	ts := timeStamp()
+	ts := timeStamp(l.stack.Clock())
 	v := uint32(cookie) - l.cookieHash(id, 0, 0) - uint32(seq)
 	cookieTS := v >> tsOffset
 	if ((ts - cookieTS) & tsMask) > maxTSDiff {
@@ -247,7 +247,7 @@ func (l *listenContext) createConnectingEndpoint(s *segment, rcvdSynOpts *header
 func (l *listenContext) startHandshake(s *segment, opts *header.TCPSynOptions, queue *waiter.Queue, owner tcpip.PacketOwner) (*handshake, tcpip.Error) {
 	// Create new endpoint.
 	irs := s.sequenceNumber
-	isn := generateSecureISN(s.id, l.stack.Seed())
+	isn := generateSecureISN(s.id, l.stack.Clock(), l.stack.Seed())
 	ep, err := l.createConnectingEndpoint(s, opts, queue)
 	if err != nil {
 		return nil, err
@@ -330,7 +330,9 @@ func (l *listenContext) performHandshake(s *segment, opts *header.TCPSynOptions,
 	}
 	ep := h.ep
 
-	if err := h.complete(); err != nil {
+	// N.B. the endpoint is generated above by startHandshake, and will be
+	// returned locked. This first call is forced.
+	if err := h.complete(); err != nil { // +checklocksforce
 		ep.stack.Stats().TCP.FailedConnectionAttempts.Increment()
 		ep.stats.FailedConnectionAttempts.Increment()
 		l.cleanupFailedHandshake(h)
@@ -364,6 +366,7 @@ func (l *listenContext) closeAllPendingEndpoints() {
 }
 
 // Precondition: h.ep.mu must be held.
+// +checklocks:h.ep.mu
 func (l *listenContext) cleanupFailedHandshake(h *handshake) {
 	e := h.ep
 	e.mu.Unlock()
@@ -504,7 +507,9 @@ func (e *endpoint) handleSynSegment(ctx *listenContext, s *segment, opts *header
 	}
 
 	go func() {
-		if err := h.complete(); err != nil {
+		// Note that startHandshake returns a locked endpoint. The
+		// force call here just makes it so.
+		if err := h.complete(); err != nil { // +checklocksforce
 			e.stack.Stats().TCP.FailedConnectionAttempts.Increment()
 			e.stats.FailedConnectionAttempts.Increment()
 			ctx.cleanupFailedHandshake(h)
@@ -550,7 +555,7 @@ func (e *endpoint) handleListenSegment(ctx *listenContext, s *segment) tcpip.Err
 	e.rcvQueueInfo.rcvQueueMu.Lock()
 	rcvClosed := e.rcvQueueInfo.RcvClosed
 	e.rcvQueueInfo.rcvQueueMu.Unlock()
-	if rcvClosed || s.flagsAreSet(header.TCPFlagSyn|header.TCPFlagAck) {
+	if rcvClosed || s.flags.Contains(header.TCPFlagSyn|header.TCPFlagAck) {
 		// If the endpoint is shutdown, reply with reset.
 		//
 		// RFC 793 section 3.4 page 35 (figure 12) outlines that a RST
@@ -560,6 +565,10 @@ func (e *endpoint) handleListenSegment(ctx *listenContext, s *segment) tcpip.Err
 	}
 
 	switch {
+	case s.flags.Contains(header.TCPFlagRst):
+		e.stack.Stats().DroppedPackets.Increment()
+		return nil
+
 	case s.flags == header.TCPFlagSyn:
 		if e.acceptQueueIsFull() {
 			e.stack.Stats().TCP.ListenOverflowSynDrop.Increment()
@@ -591,7 +600,7 @@ func (e *endpoint) handleListenSegment(ctx *listenContext, s *segment) tcpip.Err
 		synOpts := header.TCPSynOptions{
 			WS:    -1,
 			TS:    opts.TS,
-			TSVal: tcpTimeStamp(time.Now(), timeStampOffset()),
+			TSVal: tcpTimeStamp(e.stack.Clock().NowMonotonic(), timeStampOffset(e.stack.Rand())),
 			TSEcr: opts.TSVal,
 			MSS:   calculateAdvertisedMSS(e.userMSS, route),
 		}
@@ -611,7 +620,7 @@ func (e *endpoint) handleListenSegment(ctx *listenContext, s *segment) tcpip.Err
 		e.stack.Stats().TCP.ListenOverflowSynCookieSent.Increment()
 		return nil
 
-	case (s.flags & header.TCPFlagAck) != 0:
+	case s.flags.Contains(header.TCPFlagAck):
 		if e.acceptQueueIsFull() {
 			// Silently drop the ack as the application can't accept
 			// the connection at this point. The ack will be
@@ -736,6 +745,13 @@ func (e *endpoint) handleListenSegment(ctx *listenContext, s *segment) tcpip.Err
 			mss:         rcvdSynOptions.MSS,
 		})
 
+		// Requeue the segment if the ACK completing the handshake has more info
+		// to be procesed by the newly established endpoint.
+		if (s.flags.Contains(header.TCPFlagFin) || s.data.Size() > 0) && n.enqueueSegment(s) {
+			s.incRef()
+			n.newSegmentWaker.Assert()
+		}
+
 		// Do the delivery in a separate goroutine so
 		// that we don't block the listen loop in case
 		// the application is slow to accept or stops
@@ -753,6 +769,7 @@ func (e *endpoint) handleListenSegment(ctx *listenContext, s *segment) tcpip.Err
 		return nil
 
 	default:
+		e.stack.Stats().DroppedPackets.Increment()
 		return nil
 	}
 }
