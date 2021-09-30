@@ -8,7 +8,7 @@ build: gvproxy qemu-wrapper vm
 
 .PHONY: gvproxy
 gvproxy:
-	go build $(LDFLAGS) -o bin/gvproxy ./cmd/gvproxy
+	go build -mod=vendor $(LDFLAGS) -o bin/gvproxy ./cmd/gvproxy
 
 .PHONY: qemu-wrapper
 qemu-wrapper:

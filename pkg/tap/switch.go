@@ -2,8 +2,10 @@ package tap
 
 import (
 	"context"
+	"gvisor.dev/gvisor/pkg/tcpip/network/ipv6"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -121,7 +123,7 @@ func (e *Switch) tx(src, dst tcpip.LinkAddress, pkt *stack.PacketBuffer) error {
 	e.connLock.Lock()
 	defer e.connLock.Unlock()
 
-	if dst == header.EthernetBroadcastAddress {
+	if dst == header.EthernetBroadcastAddress || header.IsMulticastEthernetAddress(dst) {
 		e.camLock.RLock()
 		srcID, ok := e.cam[src]
 		if !ok {
@@ -206,7 +208,9 @@ loop:
 
 		if e.debug {
 			packet := gopacket.NewPacket(buf, layers.LayerTypeEthernet, gopacket.Default)
-			log.Info(packet.String())
+			if strings.Contains(packet.String(), "IPv6") {
+				log.Info(packet.String())
+			}
 		}
 
 		view := buffer.View(buf)
@@ -217,14 +221,29 @@ loop:
 		e.cam[eth.SourceAddress()] = id
 		e.camLock.Unlock()
 
+		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
+			Data: vv,
+		})
+
+		if eth.Type() == ipv6.ProtocolNumber {
+			foo := header.IPv6(buf[header.EthernetMinimumSize:])
+			if foo.TransportProtocol() == header.ICMPv6ProtocolNumber {
+				pay := header.ICMPv6(foo.Payload())
+				if pay.Type() == header.ICMPv6RouterSolicit {
+					simple := raBufSimple(e.gateway.LinkAddress(), eth.SourceAddress(), tcpip.Address(net.ParseIP("fe80::1")), 1000)
+					if err := e.tx(e.gateway.LinkAddress(), eth.SourceAddress(), simple); err != nil {
+						log.Error(err)
+					}
+				}
+			}
+		}
+
 		if eth.DestinationAddress() != e.gateway.LinkAddress() {
-			if err := e.tx(eth.SourceAddress(), eth.DestinationAddress(), stack.NewPacketBuffer(stack.PacketBufferOptions{
-				Data: vv,
-			})); err != nil {
+			if err := e.tx(eth.SourceAddress(), eth.DestinationAddress(), pkt); err != nil {
 				log.Error(err)
 			}
 		}
-		if eth.DestinationAddress() == e.gateway.LinkAddress() || eth.DestinationAddress() == header.EthernetBroadcastAddress {
+		if eth.DestinationAddress() == e.gateway.LinkAddress() || eth.DestinationAddress() == header.EthernetBroadcastAddress || header.IsMulticastEthernetAddress(eth.DestinationAddress()) {
 			vv.TrimFront(header.EthernetMinimumSize)
 			e.gateway.DeliverNetworkPacket(
 				eth.SourceAddress(),

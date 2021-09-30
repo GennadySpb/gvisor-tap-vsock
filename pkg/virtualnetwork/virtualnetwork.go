@@ -1,11 +1,6 @@
 package virtualnetwork
 
 import (
-	"math"
-	"net"
-	"net/http"
-	"os"
-
 	"github.com/containers/gvisor-tap-vsock/pkg/tap"
 	"github.com/containers/gvisor-tap-vsock/pkg/types"
 	"github.com/pkg/errors"
@@ -13,10 +8,15 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/link/sniffer"
 	"gvisor.dev/gvisor/pkg/tcpip/network/arp"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
+	"gvisor.dev/gvisor/pkg/tcpip/network/ipv6"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/icmp"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
+	"math"
+	"net"
+	"net/http"
+	"os"
 )
 
 type VirtualNetwork struct {
@@ -99,6 +99,7 @@ func (n *VirtualNetwork) BytesReceived() uint64 {
 func createStack(configuration *types.Configuration, endpoint stack.LinkEndpoint) (*stack.Stack, error) {
 	s := stack.New(stack.Options{
 		NetworkProtocols: []stack.NetworkProtocolFactory{
+			ipv6.NewProtocol,
 			ipv4.NewProtocol,
 			arp.NewProtocol,
 		},
@@ -106,6 +107,7 @@ func createStack(configuration *types.Configuration, endpoint stack.LinkEndpoint
 			tcp.NewProtocol,
 			udp.NewProtocol,
 			icmp.NewProtocol4,
+			icmp.NewProtocol6,
 		},
 	})
 
@@ -119,9 +121,29 @@ func createStack(configuration *types.Configuration, endpoint stack.LinkEndpoint
 	}, stack.AddressProperties{}); err != nil {
 		return nil, errors.New(err.String())
 	}
+	if err := s.AddProtocolAddress(1, tcpip.ProtocolAddress{
+		Protocol: ipv6.ProtocolNumber,
+		AddressWithPrefix: tcpip.AddressWithPrefix{
+			Address:   tcpip.Address(net.ParseIP("fe80::1")),
+			PrefixLen: 64,
+		},
+	}, stack.AddressProperties{}); err != nil {
+		return nil, errors.New(err.String())
+	}
+
+	if err := s.AddProtocolAddress(1, tcpip.ProtocolAddress{
+		Protocol: ipv6.ProtocolNumber,
+		AddressWithPrefix: tcpip.AddressWithPrefix{
+			Address:   tcpip.Address(net.ParseIP("fd00::2")),
+			PrefixLen: 64,
+		},
+	}, stack.AddressProperties{}); err != nil {
+		return nil, errors.New(err.String())
+	}
 
 	s.SetSpoofing(1, true)
 	s.SetPromiscuousMode(1, true)
+	s.SetNICForwarding(1, ipv6.ProtocolNumber, true)
 
 	_, parsedSubnet, err := net.ParseCIDR(configuration.Subnet)
 	if err != nil {
@@ -132,9 +154,24 @@ func createStack(configuration *types.Configuration, endpoint stack.LinkEndpoint
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot parse subnet")
 	}
+
+	_, parsedSubnet6, err := net.ParseCIDR("fd00::2/64")
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot parse cidr")
+	}
+
+	subnet6, err := tcpip.NewSubnet(tcpip.Address(parsedSubnet6.IP), tcpip.AddressMask(parsedSubnet6.Mask))
+	if err != nil {
+		return nil, errors.Wrap(err, "cannot parse subnet")
+	}
 	s.SetRouteTable([]tcpip.Route{
 		{
 			Destination: subnet,
+			Gateway:     "",
+			NIC:         1,
+		},
+		{
+			Destination: subnet6,
 			Gateway:     "",
 			NIC:         1,
 		},
