@@ -93,7 +93,21 @@ outer:
 			break
 		}
 
-		template := `%s -m 2048 -nographic -serial file:%s -snapshot -drive if=virtio,file=%s -fw_cfg name=opt/com.coreos/config,file=%s -netdev socket,id=vlan,connect=127.0.0.1:%d -device virtio-net-pci,netdev=vlan,mac=5a:94:ef:e4:0c:ee`
+		//template := `%s -m 2048 -nographic -serial file:%s -snapshot -drive if=virtio,file=%s -fw_cfg name=opt/com.coreos/config,file=%s -netdev socket,id=vlan,connect=127.0.0.1:%d -device virtio-net-pci,netdev=vlan,mac=5a:94:ef:e4:0c:ee`
+		templateArr := []string{`%s -m 2048`,
+			`-drive if=pflash,file=/opt/homebrew/Cellar/qemu-virgl/20211212.1/share/qemu/edk2-aarch64-code.fd,format=raw,readonly=on`, // UEFI
+			`-drive if=pflash,file=ovmf_vars.fd,format=raw`,                                 //
+			`-chardev socket,id=char-serial,path=serial.sock,server=on,wait=off,logfile=%s`, // serial.log
+			`-serial chardev:char-serial`,
+			`-display vnc=127.0.0.1:3333`,
+			`-snapshot`,
+			`-drive if=virtio,file=%s`,
+			`-fw_cfg name=opt/com.coreos/config,file=%s`,
+			`-netdev socket,id=vlan,connect=127.0.0.1:%d`,
+			`-device virtio-net-pci,netdev=vlan,mac=5a:94:ef:e4:0c:ee`,
+		}
+		template := strings.Join(templateArr, " ")
+
 		// #nosec
 		client = exec.Command(qemuExecutable(), strings.Split(fmt.Sprintf(template, qemuArgs(), qconLog, qemuImage, ignFile, qemuPort), " ")...)
 		Expect(client.Start()).Should(Succeed())
@@ -129,6 +143,9 @@ outer:
 })
 
 func qemuExecutable() string {
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		return "qemu-system-aarch64"
+	}
 	if runtime.GOOS == "darwin" {
 		return "qemu-system-x86_64"
 	}
@@ -136,6 +153,9 @@ func qemuExecutable() string {
 }
 
 func qemuArgs() string {
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		return "-accel hvf -machine virt,highmem=off -smp 4 -cpu cortex-a72"
+	}
 	if runtime.GOOS == "darwin" {
 		return "-machine q35,accel=hvf:tcg -smp 4"
 	}
